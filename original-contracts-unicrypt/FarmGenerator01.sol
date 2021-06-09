@@ -21,10 +21,66 @@ interface FarmFactory {
     function registerFarm (address _farmAddress) external;
 }
 
+interface IUniFactory {
+    function getPair(address tokenA, address tokenB) external view returns (address);
+}
+
+interface IUniswapV2Pair {
+    event Approval(address indexed owner, address indexed spender, uint value);
+    event Transfer(address indexed from, address indexed to, uint value);
+
+    function name() external pure returns (string memory);
+    function symbol() external pure returns (string memory);
+    function decimals() external pure returns (uint8);
+    function totalSupply() external view returns (uint);
+    function balanceOf(address owner) external view returns (uint);
+    function allowance(address owner, address spender) external view returns (uint);
+
+    function approve(address spender, uint value) external returns (bool);
+    function transfer(address to, uint value) external returns (bool);
+    function transferFrom(address from, address to, uint value) external returns (bool);
+
+    function DOMAIN_SEPARATOR() external view returns (bytes32);
+    function PERMIT_TYPEHASH() external pure returns (bytes32);
+    function nonces(address owner) external view returns (uint);
+
+    function permit(address owner, address spender, uint value, uint deadline, uint8 v, bytes32 r, bytes32 s) external;
+
+    event Mint(address indexed sender, uint amount0, uint amount1);
+    event Burn(address indexed sender, uint amount0, uint amount1, address indexed to);
+    event Swap(
+        address indexed sender,
+        uint amount0In,
+        uint amount1In,
+        uint amount0Out,
+        uint amount1Out,
+        address indexed to
+    );
+    event Sync(uint112 reserve0, uint112 reserve1);
+
+    function MINIMUM_LIQUIDITY() external pure returns (uint);
+    function factory() external view returns (address);
+    function token0() external view returns (address);
+    function token1() external view returns (address);
+    function getReserves() external view returns (uint112 reserve0, uint112 reserve1, uint32 blockTimestampLast);
+    function price0CumulativeLast() external view returns (uint);
+    function price1CumulativeLast() external view returns (uint);
+    function kLast() external view returns (uint);
+
+    function mint(address to) external returns (uint liquidity);
+    function burn(address to) external returns (uint amount0, uint amount1);
+    function swap(uint amount0Out, uint amount1Out, address to, bytes calldata data) external;
+    function skim(address to) external;
+    function sync() external;
+
+    function initialize(address, address) external;
+}
+
 contract FarmGenerator01 is Ownable {
     using SafeMath for uint256;
     
     FarmFactory public factory;
+    IUniFactory public uniswapFactory;
     
     address payable devaddr;
     
@@ -49,13 +105,14 @@ contract FarmGenerator01 is Ownable {
         uint256 amountFee;
     }
     
-    constructor(FarmFactory _factory) public {
+    constructor(FarmFactory _factory, IUniFactory _uniswapFactory) public {
         factory = _factory;
         devaddr = msg.sender;
         gFees.useGasToken = false;
         gFees.gasFee = 1 * (10 ** 18);
         gFees.ethFee = 2e17;
         gFees.tokenFee = 10; // 1%
+        uniswapFactory = _uniswapFactory;
     }
     
     /**
@@ -120,11 +177,16 @@ contract FarmGenerator01 is Ownable {
     /**
      * @notice Creates a new Farm contract and registers it in the FarmFactory.sol. All farming rewards are locked in the Farm Contract
      */
-    function createFarm (IERC20 _rewardToken, uint256 _amount, IERC20 _farmToken, uint256 _blockReward, uint256 _startBlock, uint256 _bonusEndBlock, uint256 _bonus) public payable returns (address) {
+    function createFarm (IERC20 _rewardToken, uint256 _amount, IERC20 _lpToken, uint256 _blockReward, uint256 _startBlock, uint256 _bonusEndBlock, uint256 _bonus) public payable returns (address) {
         require(_startBlock > block.number, 'START'); // ideally at least 24 hours more to give farmers time
         require(_bonus > 0, 'BONUS');
         require(address(_rewardToken) != address(0), 'TOKEN');
         require(_blockReward > 1000, 'BR'); // minimum 1000 divisibility per block reward
+        
+        // ensure this pair is on uniswap by querying the factory
+        IUniswapV2Pair lpair = IUniswapV2Pair(address(_lpToken));
+        address factoryPairAddress = uniswapFactory.getPair(lpair.token0(), lpair.token1());
+        require(factoryPairAddress == address(_lpToken), 'This pair is not on uniswap');
         
         FarmParameters memory params;
         (params.endBlock, params.requiredAmount, params.amountFee) = determineEndBlock(_amount, _blockReward, _startBlock, _bonusEndBlock, _bonus);
@@ -140,7 +202,7 @@ contract FarmGenerator01 is Ownable {
         TransferHelper.safeTransferFrom(address(_rewardToken), address(msg.sender), address(this), params.requiredAmount.add(params.amountFee));
         Farm01 newFarm = new Farm01(address(factory), address(this));
         TransferHelper.safeApprove(address(_rewardToken), address(newFarm), params.requiredAmount);
-        newFarm.init(_rewardToken, params.requiredAmount, _farmToken, _blockReward, _startBlock, params.endBlock, _bonusEndBlock, _bonus);
+        newFarm.init(_rewardToken, params.requiredAmount, _lpToken, _blockReward, _startBlock, params.endBlock, _bonusEndBlock, _bonus);
         
         TransferHelper.safeTransfer(address(_rewardToken), devaddr, params.amountFee);
         factory.registerFarm(address(newFarm));

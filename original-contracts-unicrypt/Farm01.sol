@@ -23,7 +23,7 @@ contract Farm01 {
     
     /// @notice all the settings for this farm in one struct
     struct FarmInfo {
-        IERC20 farmToken;
+        IERC20 lpToken;
         IERC20 rewardToken;
         uint256 startBlock;
         uint256 blockReward;
@@ -59,7 +59,7 @@ contract Farm01 {
     /**
      * @notice initialize the farming contract. This is called only once upon farm creation and the FarmGenerator ensures the farm has the correct paramaters
      */
-    function init (IERC20 _rewardToken, uint256 _amount, IERC20 _farmToken, uint256 _blockReward, uint256 _startBlock, uint256 _endBlock, uint256 _bonusEndBlock, uint256 _bonus) public {
+    function init (IERC20 _rewardToken, uint256 _amount, IERC20 _lpToken, uint256 _blockReward, uint256 _startBlock, uint256 _endBlock, uint256 _bonusEndBlock, uint256 _bonus) public {
         require(msg.sender == address(farmGenerator), 'FORBIDDEN');
 
         TransferHelper.safeTransferFrom(address(_rewardToken), msg.sender, address(this), _amount);
@@ -71,7 +71,7 @@ contract Farm01 {
         farmInfo.bonus = _bonus;
         
         uint256 lastRewardBlock = block.number > _startBlock ? block.number : _startBlock;
-        farmInfo.farmToken = _farmToken;
+        farmInfo.lpToken = _lpToken;
         farmInfo.lastRewardBlock = lastRewardBlock;
         farmInfo.accRewardPerShare = 0;
         
@@ -107,7 +107,7 @@ contract Farm01 {
     function pendingReward(address _user) external view returns (uint256) {
         UserInfo storage user = userInfo[_user];
         uint256 accRewardPerShare = farmInfo.accRewardPerShare;
-        uint256 lpSupply = farmInfo.farmToken.balanceOf(address(this));
+        uint256 lpSupply = farmInfo.lpToken.balanceOf(address(this));
         if (block.number > farmInfo.lastRewardBlock && lpSupply != 0) {
             uint256 multiplier = getMultiplier(farmInfo.lastRewardBlock, block.number);
             uint256 tokenReward = multiplier.mul(farmInfo.blockReward);
@@ -123,7 +123,7 @@ contract Farm01 {
         if (block.number <= farmInfo.lastRewardBlock) {
             return;
         }
-        uint256 lpSupply = farmInfo.farmToken.balanceOf(address(this));
+        uint256 lpSupply = farmInfo.lpToken.balanceOf(address(this));
         if (lpSupply == 0) {
             farmInfo.lastRewardBlock = block.number < farmInfo.endBlock ? block.number : farmInfo.endBlock;
             return;
@@ -149,7 +149,7 @@ contract Farm01 {
             factory.userEnteredFarm(msg.sender);
             farmInfo.numFarmers++;
         }
-        farmInfo.farmToken.safeTransferFrom(address(msg.sender), address(this), _amount);
+        farmInfo.lpToken.safeTransferFrom(address(msg.sender), address(this), _amount);
         user.amount = user.amount.add(_amount);
         user.rewardDebt = user.amount.mul(farmInfo.accRewardPerShare).div(1e12);
         emit Deposit(msg.sender, _amount);
@@ -171,7 +171,7 @@ contract Farm01 {
         safeRewardTransfer(msg.sender, pending);
         user.amount = user.amount.sub(_amount);
         user.rewardDebt = user.amount.mul(farmInfo.accRewardPerShare).div(1e12);
-        farmInfo.farmToken.safeTransfer(address(msg.sender), _amount);
+        farmInfo.lpToken.safeTransfer(address(msg.sender), _amount);
         emit Withdraw(msg.sender, _amount);
     }
 
@@ -180,7 +180,7 @@ contract Farm01 {
      */
     function emergencyWithdraw() public {
         UserInfo storage user = userInfo[msg.sender];
-        farmInfo.farmToken.safeTransfer(address(msg.sender), user.amount);
+        farmInfo.lpToken.safeTransfer(address(msg.sender), user.amount);
         emit EmergencyWithdraw(msg.sender, user.amount);
         if (user.amount > 0) {
             factory.userLeftFarm(msg.sender);
